@@ -144,6 +144,7 @@ int main(){
 
 	typename pcl::PointCloud<PointT>::Ptr cloudFiltered (new pcl::PointCloud<PointT>);
 	typename pcl::PointCloud<PointT>::Ptr scanCloud (new pcl::PointCloud<PointT>);
+	typename pcl::PointCloud<PointT>::Ptr cloudAligned (new pcl::PointCloud<PointT>);
 
 	lidar->Listen([&new_scan, &lastScanTime, &scanCloud](auto data){
 
@@ -164,6 +165,15 @@ int main(){
 	
 	Pose poseRef(Point(vehicle->GetTransform().location.x, vehicle->GetTransform().location.y, vehicle->GetTransform().location.z), Rotate(vehicle->GetTransform().rotation.yaw * pi/180, vehicle->GetTransform().rotation.pitch * pi/180, vehicle->GetTransform().rotation.roll * pi/180));
 	double maxError = 0;
+
+	// Use NDT
+	pcl::NormalDistributionsTransform<PointT, PointT> ndt;
+	ndt.setInputTarget(mapCloud);
+	ndt.setMaximumIterations(50);
+	ndt.setStepSize(1);
+	ndt.setResolution(4);
+
+	Eigen::Matrix4f ndtTransform = Eigen::Matrix4f::Identity();
 
 	while (!viewer->wasStopped())
   	{
@@ -201,15 +211,24 @@ int main(){
 			
 			new_scan = true;
 			// TODO: (Filter scan using voxel filter)
+			pcl::VoxelGrid<PointT> vg;
+			float res = 1;
+			vg.setLeafSize(res, res, res);
+			vg.setInputCloud(scanCloud);
+			vg.filter(*cloudFiltered);
 
 			// TODO: Find pose transform by using ICP or NDT matching
-			//pose = ....
+			ndt.setInputCloud(cloudFiltered);
+			ndt.align(*cloudAligned, ndtTransform);
+			ndtTransform << ndt.getFinalTransformation();
 
 			// TODO: Transform scan so it aligns with ego's actual pose and render that scan
+			pcl::transformPointCloud(*scanCloud, *cloudAligned, ndtTransform);
 
 			viewer->removePointCloud("scan");
 			// TODO: Change `scanCloud` below to your transformed scan
-			renderPointCloud(viewer, scanCloud, "scan", Color(1,0,0) );
+			renderPointCloud(viewer, cloudAligned, "scan", Color(1,0,0) );
+			pose = getPose(ndtTransform.cast<double>());
 
 			viewer->removeAllShapes();
 			drawCar(pose, 1,  Color(0,1,0), 0.35, viewer);
